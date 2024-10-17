@@ -4,6 +4,10 @@
 (define-constant err-owner-only (err u100))
 (define-constant err-not-token-owner (err u101))
 (define-constant err-listing-not-found (err u102))
+(define-constant err-invalid-price (err u103))
+(define-constant err-invalid-token-id (err u104))
+(define-constant err-invalid-uri (err u105))
+(define-constant err-invalid-royalty (err u106))
 
 ;; Define NFT asset
 (define-non-fungible-token pixelvault uint)
@@ -15,7 +19,7 @@
 ;; Define data maps
 (define-map tokens
   { token-id: uint }
-  { owner: principal, uri: (string-utf8 256) }
+  { owner: principal, creator: principal, uri: (string-utf8 256), royalty: uint }
 )
 
 (define-map listings
@@ -42,15 +46,17 @@
 )
 
 ;; Mint new NFT
-(define-public (mint (uri (string-utf8 256)))
+(define-public (mint (uri (string-utf8 256)) (royalty uint))
   (let
     (
       (token-id (var-get next-token-id))
     )
+    (asserts! (> (len uri) u0) err-invalid-uri) ;; Check if URI is not empty
+    (asserts! (<= royalty u1000) err-invalid-royalty) ;; Ensure royalty is not more than 100% (1000 basis points)
     (try! (nft-mint? pixelvault token-id tx-sender))
     (map-set tokens
       { token-id: token-id }
-      { owner: tx-sender, uri: uri }
+      { owner: tx-sender, creator: tx-sender, uri: uri, royalty: royalty }
     )
     (var-set next-token-id (+ token-id u1))
     (ok token-id)
@@ -61,8 +67,9 @@
 (define-public (list-nft (token-id uint) (price uint))
   (let
     (
-      (token-owner (unwrap! (nft-get-owner? pixelvault token-id) (err u103)))
+      (token-owner (unwrap! (nft-get-owner? pixelvault token-id) err-invalid-token-id))
     )
+    (asserts! (> price u0) err-invalid-price) ;; Check if price is greater than 0
     (asserts! (is-eq tx-sender token-owner) err-not-token-owner)
     (map-set listings
       { token-id: token-id }
@@ -78,6 +85,7 @@
     (
       (listing (unwrap! (map-get? listings { token-id: token-id }) err-listing-not-found))
     )
+    (asserts! (< token-id (var-get next-token-id)) err-invalid-token-id) ;; Check if token-id is valid
     (asserts! (is-eq tx-sender (get seller listing)) err-not-token-owner)
     (map-delete listings { token-id: token-id })
     (ok true)
@@ -91,26 +99,33 @@
       (listing (unwrap! (map-get? listings { token-id: token-id }) err-listing-not-found))
       (price (get price listing))
       (seller (get seller listing))
+      (token (unwrap! (map-get? tokens { token-id: token-id }) err-invalid-token-id))
+      (creator (get creator token))
+      (royalty (get royalty token))
+      (royalty-amount (/ (* price royalty) u10000))
+      (seller-amount (- price royalty-amount))
     )
-    (try! (stx-transfer? price tx-sender seller))
+    (asserts! (< token-id (var-get next-token-id)) err-invalid-token-id) ;; Check if token-id is valid
+    ;; Transfer royalty to creator
+    (try! (stx-transfer? royalty-amount tx-sender creator))
+    ;; Transfer remaining amount to seller
+    (try! (stx-transfer? seller-amount tx-sender seller))
+    ;; Transfer NFT ownership
     (try! (nft-transfer? pixelvault token-id seller tx-sender))
-    (map-delete listings { token-id: token-id })
+    ;; Update token ownership
     (map-set tokens
       { token-id: token-id }
-      { owner: tx-sender, uri: (get uri (unwrap! (map-get? tokens { token-id: token-id }) (err u104))) }
+      (merge token { owner: tx-sender })
     )
+    ;; Remove listing
+    (map-delete listings { token-id: token-id })
     (ok true)
   )
 )
 
-;; Get token URI
-(define-read-only (get-token-uri (token-id uint))
-  (ok (get uri (unwrap! (map-get? tokens { token-id: token-id }) (err u105))))
-)
-
-;; Get token owner
-(define-read-only (get-token-owner (token-id uint))
-  (ok (get owner (unwrap! (map-get? tokens { token-id: token-id }) (err u106))))
+;; Get token details
+(define-read-only (get-token-details (token-id uint))
+  (ok (unwrap! (map-get? tokens { token-id: token-id }) err-invalid-token-id))
 )
 
 ;; Get listing details
