@@ -1,7 +1,6 @@
 ;; PixelVault NFT Marketplace Smart Contract
 
 ;; Define constants
-(define-constant contract-owner tx-sender)
 (define-constant err-owner-only (err u100))
 (define-constant err-not-token-owner (err u101))
 (define-constant err-listing-not-found (err u102))
@@ -10,6 +9,7 @@
 (define-non-fungible-token pixelvault uint)
 
 ;; Define data variables
+(define-data-var contract-owner principal tx-sender)
 (define-data-var next-token-id uint u1)
 
 ;; Define data maps
@@ -21,6 +21,24 @@
 (define-map listings
   { token-id: uint }
   { price: uint, seller: principal }
+)
+
+;; Private function to check contract ownership
+(define-private (is-contract-owner)
+  (is-eq tx-sender (var-get contract-owner))
+)
+
+;; Transfer contract ownership
+(define-public (transfer-contract-ownership (new-owner principal))
+  (begin
+    (asserts! (is-contract-owner) err-owner-only)
+    (ok (var-set contract-owner new-owner))
+  )
+)
+
+;; Get current contract owner
+(define-read-only (get-contract-owner)
+  (ok (var-get contract-owner))
 )
 
 ;; Mint new NFT
