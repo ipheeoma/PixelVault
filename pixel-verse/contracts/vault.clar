@@ -6,6 +6,9 @@
 (define-constant err-not-token-owner (err u101))
 (define-constant err-listing-not-found (err u102))
 
+;; Define NFT asset
+(define-non-fungible-token pixelvault uint)
+
 ;; Define data variables
 (define-data-var next-token-id uint u1)
 
